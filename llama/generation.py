@@ -3,7 +3,7 @@
 
 from typing import List
 
-import torch
+import torch,sys
 
 from llama.tokenizer import Tokenizer
 from llama.model import Transformer
@@ -46,6 +46,7 @@ class LLaMA:
     def generate(
         self,
         prompts: List[str],
+        device,
         max_gen_len: int,
         temperature: float = 0.8,
         top_p: float = 0.95,
@@ -53,6 +54,7 @@ class LLaMA:
         stop_words: List[str] = None,
         repetition_penalty: float = 1.0,
     ) -> List[str]:
+
         bsz = len(prompts)
         params = self.model.params
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
@@ -65,14 +67,19 @@ class LLaMA:
 
         total_len = min(params.max_seq_len, max_gen_len + max_prompt_size)
 
-        tokens = torch.full((bsz, total_len), self.tokenizer.pad_id).cuda().long()
+        tokens = torch.full((bsz, total_len), self.tokenizer.pad_id).to(device).int()
         for k, t in enumerate(prompt_tokens):
-            tokens[k, : len(t)] = torch.tensor(t).long()
-        input_text_mask = tokens != self.tokenizer.pad_id
+            tokens[k, : len(t)] = torch.tensor(t).int()
+        input_text_mask = tokens != int(self.tokenizer.pad_id)
+        print(input_text_mask.cpu(),file=sys.stderr)
+
         start_pos = min_prompt_size
         prev_pos = 0
         for cur_pos in range(start_pos, total_len):
+            print(tokens[:, prev_pos:cur_pos].cpu(),file=sys.stderr)
+
             logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
+
             if repetition_penalty != 1.0:
                 logits_new = logits.clone()
                 batch_size = len(tokens)
@@ -99,7 +106,7 @@ class LLaMA:
 
             if self._should_stop(tokens, prompt_tokens, stop_ids, stop_words):
                 break
-        
+
         tokens[tokens == self.tokenizer.pad_id] = self.tokenizer.eos_id
         decoded = []
         num_generated_tokens = []
@@ -122,6 +129,7 @@ def sample_top_p(probs, p):
     mask = probs_sum - probs_sort > p
     probs_sort[mask] = 0.0
     probs_sort.div_(probs_sort.sum(dim=-1, keepdim=True))
+    print(probs_sort.cpu())
     next_token = torch.multinomial(probs_sort, num_samples=1)
     next_token = torch.gather(probs_idx, -1, next_token)
     return next_token

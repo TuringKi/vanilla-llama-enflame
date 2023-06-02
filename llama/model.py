@@ -3,7 +3,7 @@
 
 from typing import Optional, Tuple, Type
 from dataclasses import dataclass
-import math
+import math,sys
 
 import torch
 from torch import nn
@@ -12,15 +12,15 @@ import torch.nn.functional as F
 
 @dataclass
 class ModelArgs:
-    dim: int = 512
-    n_layers: int = 8
-    n_heads: int = 8
+    dim: int = 32
+    n_layers: int = 2
+    n_heads: int = 2
     vocab_size: int = -1  # defined later by tokenizer
-    multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
+    multiple_of: int = 32  # make SwiGLU hidden layer size multiple of large power of 2
     norm_eps: float = 1e-5
 
     max_batch_size: int = 32
-    max_seq_len: int = 1024
+    max_seq_len: int = 64
 
 
 class RMSNorm(torch.nn.Module):
@@ -58,12 +58,15 @@ def apply_rotary_emb(
     xk: torch.Tensor,
     freqs_cis: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    device = torch.device("dipu")
+    xq = xq.cpu()
+    xk = xk.cpu()
     xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
     xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-    freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
+    freqs_cis = reshape_for_broadcast(freqs_cis.cpu(), xq_)
     xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
     xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
-    return xq_out.type_as(xq), xk_out.type_as(xk)
+    return xq_out.type_as(xq).to(device), xk_out.type_as(xk).to(device)
 
 
 class Attention(nn.Module):
@@ -235,6 +238,8 @@ class Transformer(nn.Module):
     def forward(self, tokens: torch.Tensor, start_pos: int):
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
+        print(h.cpu(),file=sys.stderr)
+
         self.freqs_cis = self.freqs_cis.to(h.device)
         freqs_cis = self.freqs_cis[start_pos : start_pos + seqlen]
 
