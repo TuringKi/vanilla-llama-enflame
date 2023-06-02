@@ -58,7 +58,7 @@ class LLaMAInference:
 
 if __name__ == '__main__':
 
-    llama = LLaMAInference("/root/", "7B", max_batch_size=2)
+    llama = LLaMAInference("./", "7B", max_batch_size=2)
 
 
     start_generation = time.time()
